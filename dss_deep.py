@@ -630,226 +630,226 @@ def random_greedy_train_model_online_taylor(start_rand_idxs, bud, lam):
     )
 
 
-def train_model_online(start_rand_idxs, bud):
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    start.record()
-    torch.manual_seed(42)
-    np.random.seed(42)
-    if data_name == "mnist":
-        model = MnistNet()
-    elif data_name == "cifar10":
-        model = ResNet18(num_cls)
-    model = model.to(device)
-    idxs = start_rand_idxs
+def train_model_online(start_rand_idxs, bud):  # 定义在线训练模型的函数，参数：初始随机索引和预算大小
+    start = torch.cuda.Event(enable_timing=True)  # 创建CUDA事件用于记录开始时间
+    end = torch.cuda.Event(enable_timing=True)  # 创建CUDA事件用于记录结束时间
+    start.record()  # 记录开始时间点
+    torch.manual_seed(42)  # 设置PyTorch随机种子为42，确保可复现性
+    np.random.seed(42)  # 设置NumPy随机种子为42，确保可复现性
+    if data_name == "mnist":  # 如果数据集名称是mnist
+        model = MnistNet()  # 创建MNIST网络模型
+    elif data_name == "cifar10":  # 如果数据集名称是cifar10
+        model = ResNet18(num_cls)  # 创建ResNet18模型，类别数为num_cls
+    model = model.to(device)  # 将模型移动到指定设备（GPU或CPU）
+    idxs = start_rand_idxs  # 初始化训练子集的索引为初始随机索引
 
-    criterion = nn.CrossEntropyLoss()
-    criterion_nored = nn.CrossEntropyLoss(reduction="none")
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
-    if data_name == "mnist":
-        setf_model = SetFunction(
-            trainset,
-            x_val,
-            y_val,
-            model,
-            criterion,
-            criterion_nored,
-            learning_rate,
-            device,
-            1,
-            num_cls,
-            1000,
+    criterion = nn.CrossEntropyLoss()  # 创建交叉熵损失函数（默认reduction='mean'）
+    criterion_nored = nn.CrossEntropyLoss(reduction="none")  # 创建无归约的交叉熵损失函数（每个样本单独计算损失）
+    optimizer = optim.SGD(model.parameters(), lr=learning_rate)  # 创建SGD优化器，学习率为learning_rate
+    if data_name == "mnist":  # 如果数据集名称是mnist
+        setf_model = SetFunction(  # 创建集合函数模型（用于数据选择）
+            trainset,  # 训练集
+            x_val,  # 验证集输入
+            y_val,  # 验证集标签
+            model,  # 模型
+            criterion,  # 损失函数
+            criterion_nored,  # 无归约损失函数
+            learning_rate,  # 学习率
+            device,  # 设备
+            1,  # 通道数（MNIST为1）
+            num_cls,  # 类别数
+            1000,  # 其他参数
         )
-    elif data_name == "cifar10":
-        setf_model = SetFunction(
-            trainset,
-            x_val,
-            y_val,
-            model,
-            criterion,
-            criterion_nored,
-            learning_rate,
-            device,
-            3,
-            num_cls,
-            1000,
+    elif data_name == "cifar10":  # 如果数据集名称是cifar10
+        setf_model = SetFunction(  # 创建集合函数模型（用于数据选择）
+            trainset,  # 训练集
+            x_val,  # 验证集输入
+            y_val,  # 验证集标签
+            model,  # 模型
+            criterion,  # 损失函数
+            criterion_nored,  # 无归约损失函数
+            learning_rate,  # 学习率
+            device,  # 设备
+            3,  # 通道数（CIFAR10为3）
+            num_cls,  # 类别数
+            1000,  # 其他参数
         )
-    print("Starting Greedy Online OneStep Run with taylor!")
-    substrn_losses = np.zeros(num_epochs)
-    fulltrn_losses = np.zeros(num_epochs)
-    val_losses = np.zeros(num_epochs)
-    subset_trnloader = torch.utils.data.DataLoader(
-        trainset,
-        batch_size=trn_batch_size,
-        shuffle=False,
-        sampler=SubsetRandomSampler(idxs),
-        num_workers=1,
-        pin_memory=True,
+    print("Starting Greedy Online OneStep Run with taylor!")  # 打印开始信息
+    substrn_losses = np.zeros(num_epochs)  # 初始化子集训练损失数组，长度为训练轮数
+    fulltrn_losses = np.zeros(num_epochs)  # 初始化完整训练集损失数组，长度为训练轮数
+    val_losses = np.zeros(num_epochs)  # 初始化验证集损失数组，长度为训练轮数
+    subset_trnloader = torch.utils.data.DataLoader(  # 创建子集训练数据加载器
+        trainset,  # 训练集
+        batch_size=trn_batch_size,  # 批次大小
+        shuffle=False,  # 不打乱数据
+        sampler=SubsetRandomSampler(idxs),  # 使用子集随机采样器，只采样idxs中的索引
+        num_workers=1,  # 数据加载的进程数
+        pin_memory=True,  # 是否将数据固定在内存中（加速GPU传输）
     )
-    for i in range(0, num_epochs):
-        actual_idxs = np.array(trainset.indices)[idxs]
-        batch_wise_indices = [
-            actual_idxs[x]
-            for x in list(
-                BatchSampler(
-                    RandomSampler(actual_idxs), trn_batch_size, drop_last=False
+    for i in range(0, num_epochs):  # 遍历每个训练轮次
+        actual_idxs = np.array(trainset.indices)[idxs]  # 获取实际的训练集索引（通过trainset.indices映射）
+        batch_wise_indices = [  # 创建批次索引列表
+            actual_idxs[x]  # 获取每个批次中的实际索引
+            for x in list(  # 遍历批次采样器生成的索引
+                BatchSampler(  # 批次采样器
+                    RandomSampler(actual_idxs), trn_batch_size, drop_last=False  # 随机采样器，批次大小，不丢弃最后不完整批次
                 )
             )
         ]
-        subtrn_loss = 0
-        for batch_idx in batch_wise_indices:
-            inputs = torch.cat(
+        subtrn_loss = 0  # 初始化子集训练损失为0
+        for batch_idx in batch_wise_indices:  # 遍历每个批次索引
+            inputs = torch.cat(  # 拼接张量
                 [
-                    fullset[x][0].view(
-                        -1, 1, fullset[x][0].shape[1], fullset[x][0].shape[2]
+                    fullset[x][0].view(  # 获取完整数据集中第x个样本的第0个元素（图像），并重塑形状
+                        -1, 1, fullset[x][0].shape[1], fullset[x][0].shape[2]  # 重塑为(batch, 1, height, width)格式
                     )
-                    for x in batch_idx
+                    for x in batch_idx  # 遍历批次中的每个索引
                 ],
-                dim=0,
-            ).type(torch.float)
-            targets = torch.tensor([fullset[x][1] for x in batch_idx])
-            inputs, targets = inputs.to(device), targets.to(
-                device, non_blocking=True
+                dim=0,  # 在第0维（批次维）上拼接
+            ).type(torch.float)  # 转换为浮点类型
+            targets = torch.tensor([fullset[x][1] for x in batch_idx])  # 获取批次中所有样本的标签（第1个元素）
+            inputs, targets = inputs.to(device), targets.to(  # 将输入和目标移动到指定设备
+                device, non_blocking=True  # 非阻塞传输（加速）
             )  # targets can have non_blocking=True.
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            subtrn_loss += loss.item()
-            loss.backward()
-            optimizer.step()
-        val_loss = 0
-        full_trn_loss = 0
+            optimizer.zero_grad()  # 清零梯度
+            outputs = model(inputs)  # 前向传播，获取模型输出
+            loss = criterion(outputs, targets)  # 计算损失
+            subtrn_loss += loss.item()  # 累加损失值
+            loss.backward()  # 反向传播，计算梯度
+            optimizer.step()  # 更新模型参数
+        val_loss = 0  # 初始化验证损失为0
+        full_trn_loss = 0  # 初始化完整训练集损失为0
 
-        with torch.no_grad():
-            for batch_idx, (inputs, targets) in enumerate(valloader):
+        with torch.no_grad():  # 禁用梯度计算（评估模式）
+            for batch_idx, (inputs, targets) in enumerate(valloader):  # 遍历验证集数据加载器
                 # print(batch_idx)
-                inputs, targets = inputs.to(device), targets.to(
-                    device, non_blocking=True
+                inputs, targets = inputs.to(device), targets.to(  # 将输入和目标移动到指定设备
+                    device, non_blocking=True  # 非阻塞传输
                 )
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                val_loss += loss.item()
+                outputs = model(inputs)  # 前向传播，获取模型输出
+                loss = criterion(outputs, targets)  # 计算损失
+                val_loss += loss.item()  # 累加验证损失
 
-            for batch_idx, (inputs, targets) in enumerate(trainloader):
-                inputs, targets = inputs.to(device), targets.to(
-                    device, non_blocking=True
+            for batch_idx, (inputs, targets) in enumerate(trainloader):  # 遍历完整训练集数据加载器
+                inputs, targets = inputs.to(device), targets.to(  # 将输入和目标移动到指定设备
+                    device, non_blocking=True  # 非阻塞传输
                 )
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                full_trn_loss += loss.item()
+                outputs = model(inputs)  # 前向传播，获取模型输出
+                loss = criterion(outputs, targets)  # 计算损失
+                full_trn_loss += loss.item()  # 累加完整训练集损失
 
-        substrn_losses[i] = subtrn_loss
-        fulltrn_losses[i] = full_trn_loss
-        val_losses[i] = val_loss
-        if i % print_every == 0:  # Print Training and Validation Loss
-            print(
-                "Epoch:",
-                i + 1,
-                "SubsetTrn,FullTrn,ValLoss:",
-                subtrn_loss,
-                full_trn_loss,
-                val_loss,
+        substrn_losses[i] = subtrn_loss  # 保存当前轮次的子集训练损失
+        fulltrn_losses[i] = full_trn_loss  # 保存当前轮次的完整训练集损失
+        val_losses[i] = val_loss  # 保存当前轮次的验证损失
+        if i % print_every == 0:  # Print Training and Validation Loss  # 如果达到打印间隔
+            print(  # 打印训练和验证损失
+                "Epoch:",  # 轮次
+                i + 1,  # 当前轮次（从1开始）
+                "SubsetTrn,FullTrn,ValLoss:",  # 标签
+                subtrn_loss,  # 子集训练损失
+                full_trn_loss,  # 完整训练集损失
+                val_loss,  # 验证损失
             )
-        if ((i + 1) % select_every) == 0:
-            cached_state_dict = copy.deepcopy(model.state_dict())
-            clone_dict = copy.deepcopy(model.state_dict())
-            prev_idxs = idxs
-            print("selEpoch: %d, Starting Selection:" % i, str(datetime.datetime.now()))
-            subset_idxs, grads_idxs = setf_model.naive_greedy_max(int(bud), clone_dict)
-            idxs = subset_idxs
-            print(
+        if ((i + 1) % select_every) == 0:  # 如果达到选择间隔（每select_every轮进行一次数据选择）
+            cached_state_dict = copy.deepcopy(model.state_dict())  # 深拷贝模型状态字典（用于恢复）
+            clone_dict = copy.deepcopy(model.state_dict())  # 深拷贝模型状态字典（用于选择过程）
+            prev_idxs = idxs  # 保存之前的索引
+            print("selEpoch: %d, Starting Selection:" % i, str(datetime.datetime.now()))  # 打印选择开始信息
+            subset_idxs, grads_idxs = setf_model.naive_greedy_max(int(bud), clone_dict)  # 使用贪心算法选择最优子集索引
+            idxs = subset_idxs  # 更新训练子集索引为新选择的索引
+            print(  # 打印选择结束信息
                 "selEpoch: %d, Selection Ended at:" % (i), str(datetime.datetime.now())
             )
-            model.load_state_dict(cached_state_dict)
-            ### Change the subset_trnloader according to new found indices: subset_idxs
-            subset_trnloader = torch.utils.data.DataLoader(
-                trainset,
-                batch_size=trn_batch_size,
-                shuffle=False,
-                sampler=SubsetRandomSampler(idxs),
-                num_workers=1,
-                pin_memory=True,
+            model.load_state_dict(cached_state_dict)  # 恢复模型状态（选择过程可能修改了模型）
+            ### Change the subset_trnloader according to new found indices: subset_idxs  # 根据新找到的索引更新子集训练数据加载器
+            subset_trnloader = torch.utils.data.DataLoader(  # 重新创建子集训练数据加载器
+                trainset,  # 训练集
+                batch_size=trn_batch_size,  # 批次大小
+                shuffle=False,  # 不打乱数据
+                sampler=SubsetRandomSampler(idxs),  # 使用新的索引创建采样器
+                num_workers=1,  # 数据加载的进程数
+                pin_memory=True,  # 是否将数据固定在内存中
             )
-            print(
-                len(list(set(prev_idxs).difference(set(idxs))))
-                + len(list(set(idxs).difference(set(prev_idxs))))
+            print(  # 打印索引变化数量（对称差集的大小）
+                len(list(set(prev_idxs).difference(set(idxs))))  # 之前有但新索引没有的数量
+                + len(list(set(idxs).difference(set(prev_idxs))))  # 新索引有但之前没有的数量
             )
-    end.record()
-    # Waits for everything to finish running
-    torch.cuda.synchronize()
-    time = start.elapsed_time(end) / 1000
-    subtrn_loss = 0
-    subtrn_correct = 0
-    subtrn_total = 0
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(subset_trnloader):
-            inputs, targets = inputs.to(device), targets.to(device, non_blocking=True)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            subtrn_loss += loss.item()
-            _, predicted = outputs.max(1)
-            subtrn_total += targets.size(0)
-            subtrn_correct += predicted.eq(targets).sum().item()
-    subtrn_acc = subtrn_correct / subtrn_total
+    end.record()  # 记录结束时间点
+    # Waits for everything to finish running  # 等待所有操作完成
+    torch.cuda.synchronize()  # 同步CUDA操作，确保所有GPU计算完成
+    time = start.elapsed_time(end) / 1000  # 计算总耗时（毫秒转秒）
+    subtrn_loss = 0  # 初始化子集训练损失为0
+    subtrn_correct = 0  # 初始化子集训练正确预测数为0
+    subtrn_total = 0  # 初始化子集训练总样本数为0
+    with torch.no_grad():  # 禁用梯度计算（评估模式）
+        for batch_idx, (inputs, targets) in enumerate(subset_trnloader):  # 遍历子集训练数据加载器
+            inputs, targets = inputs.to(device), targets.to(device, non_blocking=True)  # 将输入和目标移动到指定设备
+            outputs = model(inputs)  # 前向传播，获取模型输出
+            loss = criterion(outputs, targets)  # 计算损失
+            subtrn_loss += loss.item()  # 累加损失
+            _, predicted = outputs.max(1)  # 获取预测类别（最大值索引）
+            subtrn_total += targets.size(0)  # 累加批次大小
+            subtrn_correct += predicted.eq(targets).sum().item()  # 累加正确预测数
+    subtrn_acc = subtrn_correct / subtrn_total  # 计算子集训练准确率
 
-    val_loss = 0
-    val_correct = 0
-    val_total = 0
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(valloader):
-            inputs, targets = inputs.to(device), targets.to(device, non_blocking=True)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            val_loss += loss.item()
-            _, predicted = outputs.max(1)
-            val_total += targets.size(0)
-            val_correct += predicted.eq(targets).sum().item()
-    val_acc = val_correct / val_total
-    full_trn_loss = 0
-    full_trn_correct = 0
-    full_trn_total = 0
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(trainloader):
-            inputs, targets = inputs.to(device), targets.to(device, non_blocking=True)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            full_trn_loss += loss.item()
-            _, predicted = outputs.max(1)
-            full_trn_total += targets.size(0)
-            full_trn_correct += predicted.eq(targets).sum().item()
-    full_trn_acc = full_trn_correct / full_trn_total
-    test_loss = 0
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(device), targets.to(device, non_blocking=True)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            test_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
-    tst_acc = correct / total
-    print("SelectionRun---------------------------------")
-    print("Final SubsetTrn and FullTrn Loss:", subtrn_loss, full_trn_loss)
-    print("Validation Loss and Accuracy:", val_loss, val_acc)
-    print("Test Data Loss and Accuracy:", test_loss, tst_acc)
-    print("-----------------------------------")
-    return (
-        val_acc,
-        tst_acc,
-        subtrn_acc,
-        full_trn_acc,
-        val_loss,
-        test_loss,
-        subtrn_loss,
-        full_trn_loss,
-        val_losses,
-        substrn_losses,
-        fulltrn_losses,
-        idxs,
-        time,
+    val_loss = 0  # 初始化验证损失为0
+    val_correct = 0  # 初始化验证正确预测数为0
+    val_total = 0  # 初始化验证总样本数为0
+    with torch.no_grad():  # 禁用梯度计算（评估模式）
+        for batch_idx, (inputs, targets) in enumerate(valloader):  # 遍历验证集数据加载器
+            inputs, targets = inputs.to(device), targets.to(device, non_blocking=True)  # 将输入和目标移动到指定设备
+            outputs = model(inputs)  # 前向传播，获取模型输出
+            loss = criterion(outputs, targets)  # 计算损失
+            val_loss += loss.item()  # 累加损失
+            _, predicted = outputs.max(1)  # 获取预测类别（最大值索引）
+            val_total += targets.size(0)  # 累加批次大小
+            val_correct += predicted.eq(targets).sum().item()  # 累加正确预测数
+    val_acc = val_correct / val_total  # 计算验证准确率
+    full_trn_loss = 0  # 初始化完整训练集损失为0
+    full_trn_correct = 0  # 初始化完整训练集正确预测数为0
+    full_trn_total = 0  # 初始化完整训练集总样本数为0
+    with torch.no_grad():  # 禁用梯度计算（评估模式）
+        for batch_idx, (inputs, targets) in enumerate(trainloader):  # 遍历完整训练集数据加载器
+            inputs, targets = inputs.to(device), targets.to(device, non_blocking=True)  # 将输入和目标移动到指定设备
+            outputs = model(inputs)  # 前向传播，获取模型输出
+            loss = criterion(outputs, targets)  # 计算损失
+            full_trn_loss += loss.item()  # 累加损失
+            _, predicted = outputs.max(1)  # 获取预测类别（最大值索引）
+            full_trn_total += targets.size(0)  # 累加批次大小
+            full_trn_correct += predicted.eq(targets).sum().item()  # 累加正确预测数
+    full_trn_acc = full_trn_correct / full_trn_total  # 计算完整训练集准确率
+    test_loss = 0  # 初始化测试损失为0
+    correct = 0  # 初始化测试正确预测数为0
+    total = 0  # 初始化测试总样本数为0
+    with torch.no_grad():  # 禁用梯度计算（评估模式）
+        for batch_idx, (inputs, targets) in enumerate(testloader):  # 遍历测试集数据加载器
+            inputs, targets = inputs.to(device), targets.to(device, non_blocking=True)  # 将输入和目标移动到指定设备
+            outputs = model(inputs)  # 前向传播，获取模型输出
+            loss = criterion(outputs, targets)  # 计算损失
+            test_loss += loss.item()  # 累加损失
+            _, predicted = outputs.max(1)  # 获取预测类别（最大值索引）
+            total += targets.size(0)  # 累加批次大小
+            correct += predicted.eq(targets).sum().item()  # 累加正确预测数
+    tst_acc = correct / total  # 计算测试准确率
+    print("SelectionRun---------------------------------")  # 打印分隔线
+    print("Final SubsetTrn and FullTrn Loss:", subtrn_loss, full_trn_loss)  # 打印最终子集和完整训练集损失
+    print("Validation Loss and Accuracy:", val_loss, val_acc)  # 打印验证损失和准确率
+    print("Test Data Loss and Accuracy:", test_loss, tst_acc)  # 打印测试损失和准确率
+    print("-----------------------------------")  # 打印分隔线
+    return (  # 返回结果元组
+        val_acc,  # 验证准确率
+        tst_acc,  # 测试准确率
+        subtrn_acc,  # 子集训练准确率
+        full_trn_acc,  # 完整训练集准确率
+        val_loss,  # 验证损失
+        test_loss,  # 测试损失
+        subtrn_loss,  # 子集训练损失
+        full_trn_loss,  # 完整训练集损失
+        val_losses,  # 每轮验证损失数组
+        substrn_losses,  # 每轮子集训练损失数组
+        fulltrn_losses,  # 每轮完整训练集损失数组
+        idxs,  # 最终选择的训练子集索引
+        time,  # 总训练时间
     )
 
 
